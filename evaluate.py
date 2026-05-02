@@ -128,10 +128,11 @@ def main():
     all_metrics = []
 
     for i in range(n):
-        image, gray, mask, skeleton, _, branch_map, near_skel, endpoint_map = val_samples[i]
+        image, gray, mask, skeleton, _, branch_map, near_skel, endpoint_map, distance_map = val_samples[i]
         visited, trajectories, tails = tracker.track(
             image, mask, skeleton,
             branch_map=branch_map, near_skel=near_skel, endpoint_map=endpoint_map,
+            distance_map=distance_map,
         )
 
         # ── Overlap 지표 (꼬리 제외된 visited 기준) ───────────────

@@ -1,8 +1,35 @@
 """
 혈관 유틸리티: optic disc 감지, 분기점 추출, 방향 계산.
 """
+import os
 import numpy as np
 import cv2
+import torch
+
+# ── Disc Segmentation 모델 lazy singleton ────────────────────────────
+_disc_model  = None
+_disc_device = None
+
+
+def _get_disc_model():
+    global _disc_model, _disc_device
+    if _disc_model is not None:
+        return _disc_model, _disc_device
+    try:
+        from config import CONFIG
+        ckpt = CONFIG.get("disc_seg_checkpoint", "")
+        if ckpt and os.path.exists(ckpt):
+            from src.disc_model import DiscSegNet
+            _disc_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            _disc_model  = DiscSegNet().to(_disc_device)
+            _disc_model.load_state_dict(
+                torch.load(ckpt, map_location=_disc_device, weights_only=True)
+            )
+            _disc_model.eval()
+            print(f"[DiscSeg] 모델 로드: {ckpt}")
+    except Exception as e:
+        print(f"[DiscSeg] 모델 로드 실패 (HoughCircles fallback): {e}")
+    return _disc_model, _disc_device
 
 # 8방향 이동 벡터 (environment.py와 동일)
 DIRECTIONS = [
@@ -55,49 +82,51 @@ def _disc_radius(H, W):
 
 
 def find_optic_disc_center(image, mask):
-    """허프 원 변환(HoughCircles)으로 optic disc 중심 찾기.
-    - Red 채널: disc가 붉고 밝아 대비 우수
-    - CLAHE: 국소 대비 강화 후 블러로 노이즈 제거
-    - HoughCircles: 이미지 크기 기반 동적 반경 탐색 (DRIVE/FIVES/HRF 모두 대응)
-    - 검출 실패 시 Red 채널 최대값 위치로 fallback"""
+    """
+    Optic disc 중심 찾기.
+    1순위: DL 모델 (disc_seg.pt 존재 시 자동 로드)
+    2순위: HoughCircles
+    3순위: FOV 내 red 채널 최대값
+    """
+    # ── 1순위: DL 모델 ─────────────────────────────────────
+    model, device = _get_disc_model()
+    if model is not None:
+        from src.disc_model import predict_disc_center
+        result = predict_disc_center(model, image, mask, device)
+        if result is not None:
+            return result
+
+    # ── 2순위: HoughCircles ────────────────────────────────
     H, W = image.shape[:2]
     disc_r_px = _disc_radius(H, W)
     fov = mask.astype(np.uint8)
 
-    # Red 채널 추출 (float → uint8)
     if image.dtype != np.uint8:
         red_u8 = (np.clip(image[:, :, 0], 0, 1) * 255).astype(np.uint8)
     else:
         red_u8 = image[:, :, 0].copy()
 
-    # CLAHE로 국소 대비 강화
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(red_u8)
-
-    # FOV 밖 마스킹
     enhanced = cv2.bitwise_and(enhanced, enhanced, mask=fov)
+    blurred  = cv2.GaussianBlur(enhanced, (9, 9), 2)
 
-    # 가우시안 블러 (HoughCircles 노이즈 민감도 감소)
-    blurred = cv2.GaussianBlur(enhanced, (9, 9), 2)
-
-    # 허프 원 변환 — 이미지 크기 비례 반경
     circles = cv2.HoughCircles(
         blurred,
         cv2.HOUGH_GRADIENT,
         dp=1,
         minDist=max(50, disc_r_px),
-        param1=50,   # Canny 상위 임계값
-        param2=25,   # 누적기 임계값 (낮을수록 더 많이 검출)
+        param1=50,
+        param2=25,
         minRadius=max(10, disc_r_px - 15),
         maxRadius=disc_r_px + 20,
     )
 
     if circles is not None:
-        # 가장 강한 원 (HoughCircles는 강도 순 정렬)
         x, y, _ = circles[0][0]
         return (int(round(y)), int(round(x)))
 
-    # fallback: FOV 내 red 채널 최대값 위치
+    # ── 3순위: red 채널 최대값 ─────────────────────────────
     masked = enhanced.astype(np.float32) * fov
     idx = np.argmax(masked)
     r, c = np.unravel_index(idx, masked.shape)

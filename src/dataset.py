@@ -82,9 +82,12 @@ def _load_one(meta: dict, patch_size: int, near_skel_radius: int = 1):
                              np.ones((k, k), np.uint8)).astype(bool)
     endpoint_map = find_endpoints(skel)
     start_pos   = find_start_in_optic_disc(img, mask, skeleton=skel)
+    distance_map = cv2.distanceTransform(
+        (~skel).astype(np.uint8), cv2.DIST_L2, 5
+    ).astype(np.float32)
 
     return (img, gray_padded, mask, skel, start_pos,
-            branch_map, near_skel, endpoint_map)
+            branch_map, near_skel, endpoint_map, distance_map)
 
 
 # ── Lazy-loading + 캐시 컨테이너 ─────────────────────────────────────

@@ -103,7 +103,7 @@ def render_frame_ma(image, active_agents, finished_trajs, ep, step, n_agents,
                          interpolation=cv2.INTER_NEAREST)
 
     cv2.imshow(WINDOW_NAME, vis)
-    cv2.waitKey(10)
+    cv2.waitKey(1)
 
 
 # ------------------------------------------------------------------
@@ -113,7 +113,7 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
     분기점마다 에이전트 스폰, 모든 transition을 replay buffer에 저장.
     반환: (ep_reward, avg_loss, ep_steps, all_trajectories, image)
     """
-    image, gray_padded, mask, skeleton, optic_disc, branch_map, near_skel, endpoint_map = sample
+    image, gray_padded, mask, skeleton, optic_disc, branch_map, near_skel, endpoint_map, distance_map = sample
     H, W = skeleton.shape
     h = cfg["patch_size"] // 2
     p = cfg["patch_size"]
@@ -121,8 +121,8 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
     max_steps = cfg["max_steps"]
     max_off_vessel = cfg.get("max_off_vessel", 20)
     max_agents = cfg.get("max_agents", 200)
-    local_revisit_window = cfg.get("local_revisit_window", 20)
     step_reward = cfg.get("reward_step", 0.0)
+    near_r = cfg.get("near_skel_radius", 2)
 
     visited = np.zeros((H, W), dtype=bool)
     visited_padded = np.zeros((H + 2 * h, W + 2 * h), dtype=bool)
@@ -162,14 +162,14 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
         sdr, sdc = DIRECTIONS[d]
         snr, snc = r0 + sdr, c0 + sdc
         if 0 <= snr < H and 0 <= snc < W and mask[snr, snc] and not visited[snr, snc]:
-            ag = _Agent((snr, snc), last_dir=d, local_window=local_revisit_window)
+            ag = _Agent((snr, snc), last_dir=d)
             ag.trajectory = [(r0, c0), (snr, snc)]
             visited[snr, snc] = True
             visited_padded[snr + h, snc + h] = True
             active.append(ag)
     if not active:
         initial_dir = start_dirs[0] if start_dirs else 0
-        active = [_Agent((r0, c0), last_dir=initial_dir, local_window=local_revisit_window)]
+        active = [_Agent((r0, c0), last_dir=initial_dir)]
     all_trajectories = []
 
     ep_reward = 0.0
@@ -219,7 +219,7 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
                 ag.revisit_streak += 1
                 ag.pos = (nr, nc)
                 # 최근 window 내 재방문만 패널티 — 오래된 위치 복귀(분기 탐색 후 교차로 복귀 등)는 허용
-                reward = cfg["reward_revisit"] if (nr, nc) in ag._recent_deque else 0.0
+                reward = cfg["reward_revisit"]
                 done = ag.revisit_streak >= MAX_REVISIT or ag.steps >= max_steps
                 next_obs = np.empty((3, p, p), dtype=np.float32)
                 get_obs(ag.pos, ag.last_dir, next_obs)
@@ -238,17 +238,18 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
             visited_padded[nr + h, nc + h] = True
             ag.trajectory.append((nr, nc))
 
-            # 보상 계산 (O(1) 조회)
-            if skeleton[nr, nc]:
+            # 거리 기반 연속 보상 (Paper 2 r1 단순화)
+            dist = float(distance_map[nr, nc])
+            if dist == 0:
                 reward = cfg["reward_on_vessel"] + step_reward
                 ag.off_vessel_streak = 0
-            elif near_skel[nr, nc]:
-                reward = cfg["reward_near_vessel"] + step_reward
+            elif dist <= near_r:
+                reward = cfg["reward_near_vessel"] * (1.0 - dist / (near_r + 1)) + step_reward
                 ag.off_vessel_streak = 0
             else:
-                reward = cfg["reward_off_vessel"] + step_reward
+                penalty = min(dist * 0.1, 2.0)
+                reward = cfg["reward_off_vessel"] - penalty + step_reward
                 ag.off_vessel_streak += 1
-            ag._recent_deque.append((nr, nc))
 
             # 혈관 끝점 도달 → 즉시 종료
             if endpoint_map[nr, nc]:
@@ -307,8 +308,7 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
                     bdr, bdc = DIRECTIONS[bd]
                     bnr, bnc = br + bdr, bc + bdc
                     if 0 <= bnr < H and 0 <= bnc < W and mask[bnr, bnc] and not visited[bnr, bnc]:
-                        new_ag = _Agent((bnr, bnc), last_dir=bd, is_spawned=True,
-                                        local_window=local_revisit_window)
+                        new_ag = _Agent((bnr, bnc), last_dir=bd, is_spawned=True)
                         new_ag.trajectory = [(br, bc), (bnr, bnc)]
                         visited[bnr, bnc] = True
                         visited_padded[bnr + h, bnc + h] = True
@@ -325,7 +325,7 @@ def run_ma_episode(dqn_agent, sample, cfg, total_steps_ref, ep=0, do_render=Fals
             else:
                 all_trajectories.append(ag.trajectory)
 
-        active = next_active + spawned
+        active = (next_active + spawned)[:max_agents]
         ep_steps += 1
 
         # 학습
@@ -413,10 +413,11 @@ def run_validation(val_samples, agent):
 
     metrics_list = []
     for i in range(len(val_samples)):
-        image, gray_padded, mask, skeleton, _, branch_map, near_skel, endpoint_map = val_samples[i]
+        image, gray_padded, mask, skeleton, _, branch_map, near_skel, endpoint_map, distance_map = val_samples[i]
         visited, _, _ = tracker.track(
             image, mask, skeleton,
             branch_map=branch_map, near_skel=near_skel, endpoint_map=endpoint_map,
+            distance_map=distance_map,
         )
         m = compute_overlap_metrics(visited, skeleton)
         metrics_list.append(m)

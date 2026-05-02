@@ -9,7 +9,18 @@
       "Bash(python -c \"import preprocess_new; import src.dataset\")",
       "Bash(python -c \"import src.dataset; import train; import preprocess\")",
       "Bash(python -c \"import visual_eval\")",
-      "Bash(python evaluate.py)"
+      "Bash(python evaluate.py)",
+      "Bash(python -c \"from src.disc_model import DiscSegNet, predict_disc_center; print\\('disc_model OK'\\)\")",
+      "Bash(python -c \"from src.vessel_utils import find_optic_disc_center; print\\('vessel_utils OK'\\)\")",
+      "Bash(python -c \"import train_disc_seg; print\\('train_disc_seg OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import train; print\\('train.py OK'\\)\")",
+      "Bash(python *)",
+      "Read(//tmp/**)",
+      "Bash(jobs)",
+      "Bash(tasklist)",
+      "Bash(taskkill /F /IM python.exe)",
+      "PowerShell(Stop-Process *)"
     ]
   }
 }

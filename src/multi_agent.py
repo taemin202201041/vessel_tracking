@@ -6,7 +6,6 @@
 - 배치 추론으로 GPU 효율화
 """
 import numpy as np
-from collections import deque
 
 from src.vessel_utils import (
     DIRECTIONS,
@@ -40,14 +39,13 @@ def trim_tail(trajectory, skeleton):
 SPAWN_GRACE = 10  # 스폰된 에이전트에게 주는 off_vessel 유예 스텝 수
 
 class _Agent:
-    def __init__(self, pos, last_dir=0, is_spawned=False, local_window=20):
+    def __init__(self, pos, last_dir=0, is_spawned=False):
         self.pos = pos
         self.last_dir = last_dir
         self.steps = 0
         self.trajectory = [pos]
         self.revisit_streak = 0
         self.off_vessel_streak = -SPAWN_GRACE if is_spawned else 0
-        self._recent_deque = deque(maxlen=local_window)
 
 
 class MultiAgentTracker:
@@ -77,7 +75,7 @@ class MultiAgentTracker:
         out[2] = visited_padded[r:r + p, c:c + p]
 
     # ------------------------------------------------------------------
-    def track(self, image, mask, skeleton=None, branch_map=None, near_skel=None, endpoint_map=None):
+    def track(self, image, mask, skeleton=None, branch_map=None, near_skel=None, endpoint_map=None, distance_map=None):
         """
         Parameters
         ----------
@@ -117,21 +115,20 @@ class MultiAgentTracker:
             start_dirs = get_skeleton_directions(skeleton, sr, sc)
         else:
             start_dirs = []
-        local_window = CONFIG.get("local_revisit_window", 20)
         processed_branches = set()
         active = []
         for d in (start_dirs if start_dirs else [0]):
             sdr, sdc = DIRECTIONS[d]
             snr, snc = sr + sdr, sc + sdc
             if 0 <= snr < H and 0 <= snc < W and mask[snr, snc] and not visited[snr, snc]:
-                ag = _Agent((snr, snc), last_dir=d, local_window=local_window)
+                ag = _Agent((snr, snc), last_dir=d)
                 ag.trajectory = [(sr, sc), (snr, snc)]
                 visited[snr, snc] = True
                 visited_padded[snr + h, snc + h] = True
                 active.append(ag)
         if not active:
             initial_dir = start_dirs[0] if start_dirs else 0
-            active = [_Agent(start, last_dir=initial_dir, local_window=local_window)]
+            active = [_Agent(start, last_dir=initial_dir)]
         all_trajectories = []
         total_spawned = 0
 
@@ -173,11 +170,16 @@ class MultiAgentTracker:
                 visited[nr, nc] = True
                 visited_padded[nr + h, nc + h] = True
                 ag.trajectory.append((nr, nc))
-                ag._recent_deque.append((nr, nc))
 
-                # off_vessel_streak 갱신
+                # off_vessel_streak 갱신 (distance_map 우선, 없으면 near_skel fallback)
                 if skeleton is not None:
-                    if skeleton[nr, nc] or (near_skel is not None and near_skel[nr, nc]):
+                    near_r = CONFIG.get("near_skel_radius", 2)
+                    if distance_map is not None:
+                        if distance_map[nr, nc] <= near_r:
+                            ag.off_vessel_streak = 0
+                        else:
+                            ag.off_vessel_streak += 1
+                    elif skeleton[nr, nc] or (near_skel is not None and near_skel[nr, nc]):
                         ag.off_vessel_streak = 0
                     else:
                         ag.off_vessel_streak += 1
@@ -224,8 +226,7 @@ class MultiAgentTracker:
                         bdr, bdc = DIRECTIONS[bd]
                         bnr, bnc = br + bdr, bc + bdc
                         if 0 <= bnr < H and 0 <= bnc < W and mask[bnr, bnc] and not visited[bnr, bnc]:
-                            new_ag = _Agent((bnr, bnc), last_dir=bd, is_spawned=True,
-                                            local_window=local_window)
+                            new_ag = _Agent((bnr, bnc), last_dir=bd, is_spawned=True)
                             new_ag.trajectory = [(br, bc), (bnr, bnc)]
                             visited[bnr, bnc] = True
                             visited_padded[bnr + h, bnc + h] = True
@@ -243,7 +244,7 @@ class MultiAgentTracker:
                 else:
                     next_active.append(ag)
 
-            active = next_active + spawned
+            active = (next_active + spawned)[:self.max_agents]
 
         # ── 꼬리 분리 (시각화용) ─────────────────────────────────────
         # skeleton이 없으면 트리밍 불가 → 원본 그대로 반환

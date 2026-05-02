@@ -1,0 +1,14 @@
+# 파이썬 캐시 파일 무시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+
+# 결과 이미지들 무시 (Git에는 코드만 올리는 게 깔끔합니다)
+results/*.png
+
+# 에디터 관련 설정
+.claude/
+.vscode/
+.DS_Store

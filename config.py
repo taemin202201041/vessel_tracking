@@ -28,6 +28,8 @@ CONFIG = {
     "new_gt_dir":        r"E:\Downloads\dataset\kaggl\vessel_tracking_dataset\blood_vessel",
     "new_skeletons_dir": r"E:\Downloads\dataset\kaggl\vessel_tracking_dataset\skeletons",
     "full_fundus_dir":   r"E:\Downloads\dataset\kaggl\vessel_tracking_dataset\full_fundus",
+    "optic_disc_dir":    r"E:\Downloads\dataset\kaggl\vessel_tracking_dataset\optic-disc",
+    "disc_seg_checkpoint": os.path.join(BASE_DIR, "checkpoints", "disc_seg.pt"),
 
     # 데이터 분할
     "val_ratio":    0.2,   # val 비율 (전체의 20% = ~96장)
@@ -36,8 +38,9 @@ CONFIG = {
     # 환경
     "patch_size": 31,
     "n_actions": 8,
-    "max_steps": 1000,
-    "max_off_vessel": 30,   # FOV 밖 연속 허용 스텝 (train/eval 통일)
+    "max_steps": 400,
+    "max_agents": 150,
+    "max_off_vessel": 15,   # FOV 밖 연속 허용 스텝 (train/eval 통일)
     "near_skel_radius": 2,   # near_skel 팽창 반경 px (커널 크기 = 2r+1)
 
     # 보상
@@ -45,18 +48,17 @@ CONFIG = {
     "reward_near_vessel":      0.8,   # 스켈레톤 인접 위치
     "reward_off_vessel":      -1.0,   # 혈관과 무관한 위치
     "reward_step":             0.1,   # 매 스텝 이동 시 기본 보상 (이동 인센티브)
-    "reward_revisit":         -3.0,   # 최근 local_revisit_window 스텝 내 재방문 패널티
+    "reward_revisit":         -3.0,   # 재방문 패널티
     "reward_boundary":        -8.0,   # FOV 경계 이탈 패널티
     "reward_completion":      10.0,   # on_vessel 60% 이상 완료 보상
     "reward_coverage_penalty": 30.0,  # 에피소드 종료 후 미커버 스켈레톤 비율 × 이 값만큼 패널티
-    "local_revisit_window":    20,    # 이 스텝 이내 재방문에만 패널티 적용 (오래된 재방문 허용)
 
     # DQN
     "learning_rate":    1e-4,
     "gamma":            0.99,
     "epsilon_start":    1.0,
     "epsilon_end":      0.05,
-    "epsilon_decay":    0.99995,  # 탐색 충분히 보장
+    "epsilon_decay":    0.9997,  # 탐색 충분히 보장
     "batch_size":       128,
     "replay_buffer":    50000,
     "target_update":    500,
