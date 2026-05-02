@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python train.py --resume checkpoints/ep_29000.pt --render)",
+      "Read(//e/Downloads/dataset/kaggl/vessel_tracking/**)",
+      "Read(//e/Downloads/dataset/kaggl/vessel_tracking/blood_vessel/**)",
+      "Bash(grep -oP '\\\\.[^.]+$')",
+      "Bash(python -c \"import train\")",
+      "Bash(python -c \"import preprocess_new; import src.dataset\")",
+      "Bash(python -c \"import src.dataset; import train; import preprocess\")",
+      "Bash(python -c \"import visual_eval\")",
+      "Bash(python evaluate.py)"
+    ]
+  }
+}
