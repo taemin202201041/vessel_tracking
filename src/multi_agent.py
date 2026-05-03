@@ -200,8 +200,8 @@ class MultiAgentTracker:
                     if branch_map[nr, nc]:
                         branch_pos = (nr, nc)
                     else:
-                        r0b, r1b = max(0, nr-3), min(H, nr+4)
-                        c0b, c1b = max(0, nc-3), min(W, nc+4)
+                        r0b, r1b = max(0, nr-7), min(H, nr+8)
+                        c0b, c1b = max(0, nc-7), min(W, nc+8)
                         sub = branch_map[r0b:r1b, c0b:c1b]
                         if sub.any():
                             pts = np.argwhere(sub)
