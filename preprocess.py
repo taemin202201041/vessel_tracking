@@ -29,9 +29,7 @@ def main():
 
     gt_dir   = CONFIG["new_gt_dir"]
     out_dir  = CONFIG["new_skeletons_dir"]
-    dbg_dir  = r"E:\Downloads\dataset\kaggl\vessel_tracking_dataset\erosion_debug"
     os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(dbg_dir, exist_ok=True)
 
     files = sorted(
         f for f in os.listdir(gt_dir)
@@ -45,12 +43,8 @@ def main():
         skel_path = os.path.join(out_dir, f"{stem}_skeleton.png")
 
         gt        = np.array(Image.open(os.path.join(gt_dir, fname)).convert("L"))
-        binary_u8 = (gt > 5).astype(np.uint8)
+        binary_u8 = (gt > 16).astype(np.uint8)
 
-
-        # binary_u8 스레시홀딩 결과 저장 (항상 덮어씌움)
-        dbg_path = os.path.join(dbg_dir, f"{stem}_binary.png")
-        Image.fromarray(binary_u8 * 255).save(dbg_path)
 
         if os.path.exists(skel_path) and not args.rebuild:
             skipped += 1
@@ -61,17 +55,17 @@ def main():
         while True:
             dt     = cv2.distanceTransform(result, cv2.DIST_L2, 5)
             max_dt = cv2.dilate(dt, np.ones((5, 5), np.uint8))
-            target = (dt == 1) & (max_dt >= 3)
+            target = (dt == 1) & (max_dt >= 4)
             if target.sum() == 0:
                 break
             result[target] = 0
 
-        # 침식 결과 저장
-        eroded_dbg_path = os.path.join(dbg_dir, f"{stem}_eroded.png")
-        Image.fromarray(result * 255).save(eroded_dbg_path)
+        # 고립 픽셀 제거: 8이웃이 모두 0인 픽셀 → 0
+        kernel = np.ones((3, 3), np.float32)
+        neighbor_sum = cv2.filter2D(result.astype(np.float32), -1, kernel) - result
+        result[(result == 1) & (neighbor_sum == 0)] = 0
 
-        binary = result > 0
-        skel   = skeletonize(binary).astype(np.uint8) * 255
+        skel = skeletonize(result > 0).astype(np.uint8) * 255
         Image.fromarray(skel).save(skel_path)
         done += 1
 
